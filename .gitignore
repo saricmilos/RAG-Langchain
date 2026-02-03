@@ -1,0 +1,49 @@
+# Ignore Python virtual environments
+venv/
+
+# ZIP
+*.zip
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# macOS & Windows system files
+.DS_Store
+Thumbs.db
+
+# Environment and IDE settings
+.env
+.idea/
+.vscode/
+*.bin
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# Docker artifacts
+*.log
+*.pid
+*.tar
+*.sock
+
+# Photos
+*.png
+*.jpg
+
+# Saved Models
+*.pkl
+
+# Latex
+#Report
+*.fls
+*.fdb_latexmk
+*.aux
+*.synctex.gz
+
+#Slides
+*.nav
+*.snm
+*.toc
+*.out
