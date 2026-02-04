@@ -75,4 +75,4 @@ def test_knowledge_base(force_rebuild: bool = False):
 if __name__ == "__main__":
     # SET THIS TO TRUE: If you added new files or changed splitting logic.
     # SET THIS TO FALSE: For fast testing and to verify the "load from disk" logic.
-    test_knowledge_base(force_rebuild=False)
+    test_knowledge_base(force_rebuild=True)

@@ -49,7 +49,9 @@ Our chatbot solutions are designed to support a wide range of business scenarios
 
 These systems often resolve **over 80% of inquiries autonomously**, significantly reducing support costs.
 
-## 1. SEC EDGAR (the “gold standard”)
+## 1. SEC EDGAR (the “gold standard”) https://www.sec.gov/search-filings, https://www.sec.gov/edgar/search
+
+THE COMPANIES INCLUDED: APPLE, GOOGLE, NVIDIA, MICROSOFT and data is the latest 5 years.
 
 We get this data from **SEC EDGAR**, which is the official filing system of the U.S. Securities and Exchange Commission.  
 It’s authoritative by definition: public companies are *legally required* to file their annual (10-K) and quarterly (10-Q) reports here.
@@ -118,3 +120,15 @@ Companies are required to disclose where they are investing and what they see co
 
 **Why RAG helps:**  
 These insights are often buried in footnotes or **Capital Resources** sections — places humans avoid reading, but retrieval systems handle extremely well.
+
+## Critical rate limiting (SEC rules)
+
+The SEC is very strict about its **Fair Access Policy**, and this is something you have to respect when working with EDGAR data.
+
+**The rule is simple:**  
+You should not exceed **10 requests per second**.
+
+If you ignore this and send too many requests too quickly, the SEC will **block your IP address for up to 24 hours**. There’s no warning — things just stop working.
+
+**How we handle it:**  
+To stay safely within the allowed limits, we deliberately slow the request loop down by adding a small delay:
