@@ -61,6 +61,8 @@ Unlike news articles or analyst summaries, 10-Ks and 10-Qs contain the raw numbe
 
 This makes them ideal input for a RAG system.
 
+The 10-K is a massive annual filing—often 100–300 pages long—that companies submit once a year. It gives a deep, comprehensive look at the company’s performance over the entire fiscal year, far beyond what you’ll see in quarterly reports. Inside, you’ll find audited financial statements, an overview of the company’s history and organizational structure, details on executive compensation, and a detailed list of every major risk the business believes it faces.
+
 ### Why this data works well for RAG
 
 - The documents are **highly structured** (clear sections, headers, tables)
@@ -85,41 +87,6 @@ This is where RAG shines.
 
 ---
 
-## Common search patterns we see
-
-### 1. Risk factor analysis
-
-Investors want to understand what could realistically hurt or kill a business.
-
-**Example query:**  
-> “What are the top three supply chain risks mentioned in Apple’s 2024 10-K?”
-
-**Why RAG helps:**  
-The system can pull directly from **Item 1A: Risk Factors**, ignoring marketing language and focusing only on legally required disclosures.
-
----
-
-### 2. Year-over-year (YoY) performance
-
-Users often care less about a single number and more about trends and explanations.
-
-**Example query:**  
-> “How did Microsoft’s Azure revenue growth in Q3 compare to the same quarter last year?”
-
-**Why RAG helps:**  
-The answer usually lives in the **Management’s Discussion and Analysis (MD&A)** section, where leadership explains *why* numbers changed — context that’s hard to extract with keyword search alone.
-
----
-
-### 3. Strategic clues and forward-looking statements
-
-Companies are required to disclose where they are investing and what they see coming next.
-
-**Example query:**  
-> “What did NVIDIA say about long-term commitments to AI data center expansion in its latest filing?”
-
-**Why RAG helps:**  
-These insights are often buried in footnotes or **Capital Resources** sections — places humans avoid reading, but retrieval systems handle extremely well.
 
 ## Critical rate limiting (SEC rules)
 
@@ -132,3 +99,33 @@ If you ignore this and send too many requests too quickly, the SEC will **block 
 
 **How we handle it:**  
 To stay safely within the allowed limits, we deliberately slow the request loop down by adding a small delay:
+
+# **We will test our RAG**
+
+**1. Risk & Strategy (the “detective” questions)**
+These focus on Item 1A (Risk Factors) and Item 7 (MD&A). The goal is to see whether the AI can connect global events and operational risks to Apple’s actual financial outcomes.
+
+* *What are the primary risks Apple identified regarding its supply chain in Greater China?*
+* *How does Apple describe the competitive threat from “aggressive pricing” by its rivals?*
+* *Summarize Apple’s strategy for achieving carbon neutrality across its product life cycle by 2030.*
+
+**2. Financial Performance (the “analyst” questions)**
+These target Item 8 (Financial Statements). If your RAG produces incorrect numbers here, it’s often a chunking issue—table headers may have been separated from their values.
+
+* *What was the year-over-year percentage change in “Services” revenue compared to “iPhone” revenue?*
+* *According to the MD&A, what were the primary drivers behind the change in gross margin this year?*
+* *How much did Apple spend on Research and Development (R&D) this fiscal year, and how does it compare to last year?*
+
+**3. Future Outlook (the “forward-looking” questions)**
+These probe management’s expectations, which are usually signaled by words like *expect*, *anticipate*, or *believe*.
+
+* *What does management identify as the most significant uncertainties regarding future product introductions?*
+* *How does Apple plan to manage its liquidity and capital resources over the next 12 months?*
+* *Are there any mentions of the impact of global inflation or high interest rates on consumer demand?*
+
+**4. Governance & Legal (the “fine print” questions)**
+These focus on Item 3 (Legal Proceedings) and Item 11 (Executive Compensation).
+
+* *List any significant ongoing legal proceedings that could have a material adverse effect on the company.*
+* *Does Apple have a specific committee that oversees Artificial Intelligence or emerging technologies?*
+* *What is Apple’s policy on executive officers trading in derivative instruments related to Apple stock?*

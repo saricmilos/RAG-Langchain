@@ -1,0 +1,24 @@
+# Core LangChain modules
+langchain-core>=0.1.16
+langchain-classic>=0.0.15
+langchain-community>=0.0.10
+langchain-huggingface>=0.0.7
+langchain-openai
+huggingface-hub
+langchain
+
+# API keys and env management
+python-dotenv>=1.0.0
+
+# Vector store
+faiss-cpu>=1.7.3
+
+# LLMs
+openai>=0.27.8
+
+# FastAPI (if using your async endpoint)
+fastapi>=0.108.0
+uvicorn[standard]>=0.23.1
+
+# Optional helpers
+requests>=2.31.0

@@ -57,26 +57,50 @@ async def health_check():
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """
-    Processes a chat message through the RAG pipeline.
-    Expects JSON input: {"message": "...", "session_id": "..."}
+    Processes a chat message through the RAG pipeline with detailed error reporting.
     """
+    # 1. Validation check
+    if not request.message or request.message.strip() == "":
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+
     try:
-        # Call the asynchronous RAG brain
+        # 2. Call the asynchronous RAG brain
+        # This will trigger create_conversational_chain() if it hasn't run yet
         result = await engine.ask_with_sources_async(
             question=request.message,
             session_id=request.session_id
         )
         
-        # Return the validated Pydantic response
+        # 3. Safety check on the result dictionary
+        if not result or "answer" not in result:
+            raise ValueError("RAG Engine returned an empty or invalid response.")
+
+        # 4. Return the validated Pydantic response
         return ChatResponse(
             answer=result["answer"],
-            sources=result["sources"],
+            sources=result.get("sources", []),
             session_id=request.session_id
         )
+
+    except FileNotFoundError as fnf:
+        print(f"❌ DATA ERROR: {fnf}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Vector Database missing: {str(fnf)}"
+        )
+        
     except Exception as e:
-        # Log the error for debugging and return a 500 error
-        print(f"Processing error: {e}")
-        raise HTTPException(status_code=500, detail=f"RAG Engine Error: {str(e)}")
+        # This prints the FULL error stack trace in your server terminal
+        print(f"🔥 RAG SYSTEM ERROR: {type(e).__name__}")
+        import traceback
+        traceback.print_exc() 
+        
+        # This returns the specific error message to Postman
+        error_msg = str(e) if str(e) else "Internal Engine Error (Check Server Logs)"
+        raise HTTPException(
+            status_code=500, 
+            detail=f"RAG Engine Error: {error_msg}"
+        )
 
 if __name__ == "__main__":
     import uvicorn

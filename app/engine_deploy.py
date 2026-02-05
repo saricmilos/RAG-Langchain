@@ -3,58 +3,46 @@ import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Setup Environment and Path Logic
-# __file__ is /root/app/engine_deploy.py
+# 1. Path & Env Setup
+# Ensures paths work regardless of where the script is executed
 current_file_path = Path(__file__).resolve()
 app_dir = current_file_path.parent
 root_dir = app_dir.parent
 
-# Load .env from root folder
-load_dotenv(dotenv_path=root_dir / ".env")
-
-# LangChain Imports
-from langchain_openai import OpenAIEmbeddings
+# 2. LangChain Imports
 from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.chat_history import InMemoryChatMessageHistory
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_classic.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
+from langchain_huggingface import HuggingFaceEndpointEmbeddings
 
-# Ensure langchain_functions can be imported from the app folder
+# Import your helper functions from the 'app' directory
 if str(app_dir) not in sys.path:
     sys.path.append(str(app_dir))
 
-from langchain_functions import (
+from functions_deploy import (
     get_vectorstore_retriever,
     create_compression_retriever,
     instantiate_llm
 )
 
+# --- PROMPT TEMPLATES ---
+
 REWRITER_SYSTEM_PROMPT = """
-<task_context>
-You are an expert Query Transformation Engine. Your goal is to convert a conversational follow-up into a context-independent Standalone Question for a RAG pipeline.
-</task_context>
-
-<rules>
-1. CORE_TASK: Use 'Chat History' to resolve ambiguity in the 'Follow-up Input'.
-2. NO_CHAT: Do NOT answer the question. 
-3. PRONOUN_RESOLUTION: Replace 'it', 'they', etc., with specific entities from history.
-4. LANGUAGE_PARITY: Output in the same language as the Follow-up Input.
-5. NO_CHANGE_REQUIRED: If the input is already a clear standalone question, return it as-is.
-</rules>
-
-<output_format>
-Return ONLY the rephrased string. No additional text.
-</output_format>
+You are an expert Query Transformation Engine. 
+Convert the conversational follow-up into a context-independent Standalone Question.
+Use 'Chat History' to resolve pronouns (it, they, etc.).
+Return ONLY the rephrased string. No extra text.
 """
 
 def get_answer_template(language: str = "English") -> ChatPromptTemplate:
     system_instruction = (
-        "You are a precise assistant. Answer the user's question using ONLY the "
-        "provided context delimited by <context></context> tags.\n\n"
-        "If the answer is not in the context, say you don't know. "
-        f"Your response must be written in {language}."
+        "You are a precise financial assistant. Answer the user's question using ONLY the "
+        "provided context inside <context> tags.\n\n"
+        "If the answer is not in the context, say you don't know.\n"
+        f"Answer in {language}."
     )
 
     return ChatPromptTemplate.from_messages([
@@ -62,6 +50,8 @@ def get_answer_template(language: str = "English") -> ChatPromptTemplate:
         MessagesPlaceholder(variable_name="chat_history"),
         ("user", "Context:\n<context>\n{context}\n</context>\n\nQuestion: {input}")
     ])
+
+# --- MAIN ENGINE ---
 
 class ChatEngine:
     def __init__(
@@ -72,12 +62,18 @@ class ChatEngine:
     ):
         self.provider = provider
         self.model_name = model_name
-        self.api_key = api_key or os.getenv(f"{provider.upper()}_API_KEY")
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         
         if not self.api_key:
-            raise ValueError(f"API Key for {provider} not found in .env.")
+            raise ValueError("API Key not found. Check your .env file.")
 
-        self.embeddings = OpenAIEmbeddings() 
+        # Switch back to the model that matches your 29,802 saved vectors
+        print("Loading HuggingFace embedding model to match existing index...")
+        self.embeddings = HuggingFaceEndpointEmbeddings(
+            model="all-MiniLM-L6-v2",
+            huggingfacehub_api_token=os.environ["HUGGINGFACEHUB_API_TOKEN"]
+        )
+        
         self.vector_store = None
         self.chat_chain = None
         self.history_store = {} 
@@ -88,38 +84,45 @@ class ChatEngine:
         return self.history_store[session_id]
 
     def load_offline_knowledge_base(self):
-        # Look for data folder in the root directory
+        """Loads the pre-built FAISS index from the specific folder."""
         persist_path = root_dir / "data" / "vector_stores" / "faiss_index"
         
-        if persist_path.exists():
-            print(f"Loading index from: {persist_path}")
+        if (persist_path / "index.faiss").exists():
+            print(f"📦 Loading pre-built index from: {persist_path}")
+            # allow_dangerous_deserialization is required for loading local pickle files (.pkl)
             self.vector_store = FAISS.load_local(
                 str(persist_path), 
                 self.embeddings, 
                 allow_dangerous_deserialization=True
             )
+            print(f"✅ Success: Loaded {self.vector_store.index.ntotal} vectors.")
         else:
-            raise FileNotFoundError(f"FAISS index folder not found at: {persist_path}")
+            raise FileNotFoundError(f"FAISS index files missing at: {persist_path}")
     
     def create_conversational_chain(self, strategy: str = "similarity"):
+        """Builds the full RAG pipeline."""
         if not self.vector_store:
             self.load_offline_knowledge_base()
         
+        # 1. Retriever Selection
         if strategy == "mmr":
-            base_retriever = get_vectorstore_retriever(self.vector_store, search_type="mmr", k=4, fetch_k=20)
+            base_retriever = get_vectorstore_retriever(self.vector_store, search_type="mmr", k=4)
         elif strategy == "compression":
             standard_retriever = get_vectorstore_retriever(self.vector_store, k=10)
             base_retriever = create_compression_retriever(self.embeddings, standard_retriever, k=4)
         else: 
             base_retriever = get_vectorstore_retriever(self.vector_store, k=4)
 
-        llm_rephraser = instantiate_llm(provider=self.provider, api_key=self.api_key, model_name="gpt-4o", temperature=0.0)
-        llm_generator = instantiate_llm(provider=self.provider, api_key=self.api_key, model_name=self.model_name, temperature=0.5)
+        # 2. Setup LLMs
+        # We use a lower temperature for rephrasing to keep it precise
+        llm_rephraser = instantiate_llm(self.provider, self.api_key, "gpt-4o", 0.0)
+        llm_generator = instantiate_llm(self.provider, self.api_key, self.model_name, 0.5)
 
+        # 3. History-Aware Retrieval
         rephrase_prompt = ChatPromptTemplate.from_messages([
             ("system", REWRITER_SYSTEM_PROMPT),
             MessagesPlaceholder(variable_name="chat_history"),
-            ("human", "<follow_up_input>\n{input}\n</follow_up_input>"),
+            ("human", "{input}"),
         ])
         
         history_aware_retriever = create_history_aware_retriever(
@@ -128,10 +131,12 @@ class ChatEngine:
             prompt=rephrase_prompt
         )
 
+        # 4. Final Answer Chain
         qa_prompt = get_answer_template(language="English")
         question_answer_chain = create_stuff_documents_chain(llm=llm_generator, prompt=qa_prompt)
         rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
 
+        # 5. History Wrapper
         self.chat_chain = RunnableWithMessageHistory(
             rag_chain,
             self.get_session_history,
@@ -141,6 +146,7 @@ class ChatEngine:
         )
     
     async def ask_with_sources_async(self, question: str, session_id: str = "default_session"):
+        """Async entry point for FastAPI."""
         if not self.chat_chain:
             self.create_conversational_chain()
         
@@ -149,8 +155,9 @@ class ChatEngine:
             config={"configurable": {"session_id": session_id}}
         )
     
+        # Extract unique sources from context documents
         context_docs = response.get("context", [])
-        sources = list(set(doc.metadata.get("source", "Unknown") for doc in context_docs))
+        sources = sorted(list(set(doc.metadata.get("source", "Unknown") for doc in context_docs)))
 
         return {
             "answer": response["answer"],

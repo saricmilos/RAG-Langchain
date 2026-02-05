@@ -13,7 +13,8 @@ root_dir = app_dir.parent
 load_dotenv(dotenv_path=root_dir / ".env")
 
 # 2. LangChain Imports
-from langchain_openai import OpenAIEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
+from tqdm import tqdm
 from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.chat_history import InMemoryChatMessageHistory
@@ -27,7 +28,7 @@ if str(app_dir) not in sys.path:
 
 from langchain_functions import (
     langchain_document_loader,
-    create_advanced_markdown_splitter,
+    create_advanced_sec_splitter,
     get_vectorstore_retriever,
     create_compression_retriever,
     instantiate_llm
@@ -91,7 +92,13 @@ class ChatEngine:
         if not self.api_key:
             raise ValueError(f"API Key for {provider} not found!")
 
-        self.embeddings = OpenAIEmbeddings() 
+        print("Loading local embedding model: sentence-transformers/all-MiniLM-L6-v2...")
+        self.embeddings = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            model_kwargs={'device': 'cpu'},
+            encode_kwargs={'normalize_embeddings': False}
+        )
+
         self.vector_store = None
         self.chat_chain = None
         self.history_store = {} # Session ID -> InMemoryChatMessageHistory
@@ -102,31 +109,89 @@ class ChatEngine:
         return self.history_store[session_id]
 
     def build_knowledge_base(self, force_rebuild: bool = False):
-        persist_path = root_dir / "data" / "vector_stores" / "faiss_index"
-        if not force_rebuild and persist_path.exists():
-            print(f"Loading vector store from {persist_path}")
-            self.vector_store = FAISS.load_local(
-                str(persist_path), self.embeddings, allow_dangerous_deserialization=True
-            )
+            persist_path = root_dir / "data" / "vector_stores" / "faiss_index"
+            processed_companies = set()
+            
+            # 1. Load existing and identify what is already indexed
+            if not force_rebuild and persist_path.exists():
+                tqdm.write(f"Loading main index from {persist_path}")
+                self.vector_store = FAISS.load_local(
+                    str(persist_path), self.embeddings, allow_dangerous_deserialization=True
+                )
+                
+                # Extract unique companies from existing metadata
+                # docstore contains all the documents currently in the index
+                if self.vector_store.docstore:
+                    processed_companies = {
+                        doc.metadata.get("company_name") 
+                        for doc in self.vector_store.docstore._dict.values()
+                        if "company_name" in doc.metadata
+                    }
+                    tqdm.write(f"Detected {len(processed_companies)} companies already in index.")
+            else:
+                tqdm.write("Starting a fresh build...")
+                self.vector_store = None
+
+            edgar_path = Path(self.data_path)
+            if (edgar_path / "sec-edgar-filings").exists():
+                edgar_path = edgar_path / "sec-edgar-filings"
+                
+            # Filter out folders that are already in the processed_companies set
+            all_folders = [f for f in edgar_path.iterdir() if f.is_dir()]
+            company_folders = [f for f in all_folders if f.name not in processed_companies]
+            
+            if not company_folders:
+                tqdm.write("✨ All companies are already indexed. Nothing to do!")
+                return self.vector_store
+
+            tqdm.write(f"Queue: {len(company_folders)} new companies to process.")
+            sec_splitter = create_advanced_sec_splitter()
+
+            # 2. Main Loop
+            for folder in tqdm(company_folders, desc="🚀 Overall Progress", unit="company"):
+                tqdm.write(f"\n--- Processing: {folder.name} ---")
+                
+                company_docs = langchain_document_loader(folder)
+                if not company_docs:
+                    continue
+
+                company_chunks = []
+                for doc in company_docs:
+                    doc.metadata["source"] = Path(doc.metadata.get("source", "unknown")).name
+                    doc.metadata["company_name"] = folder.name # Critical for resume logic
+                    
+                    chunks = sec_splitter.split_documents([doc])
+                    company_chunks.extend(chunks)
+
+                if not company_chunks:
+                    continue
+
+                # 3. Batch Embedding with Inner Progress Bar
+                batch_size = 50
+                total_chunks = len(company_chunks)
+                
+                # Use small slice for initial DB creation
+                temp_db = FAISS.from_documents(company_chunks[:batch_size], self.embeddings)
+                
+                if total_chunks > batch_size:
+                    for i in tqdm(range(batch_size, total_chunks, batch_size), 
+                                desc=f"   └─ Embedding {folder.name}", 
+                                leave=False):
+                        temp_db.add_documents(company_chunks[i : i + batch_size])
+
+                # 4. Merge and Save
+                if self.vector_store is None:
+                    self.vector_store = temp_db
+                else:
+                    self.vector_store.merge_from(temp_db)
+                
+                persist_path.parent.mkdir(parents=True, exist_ok=True)
+                self.vector_store.save_local(str(persist_path))
+                
+                tqdm.write(f"✅ Indexed {folder.name}. Total vectors: {self.vector_store.index.ntotal}")
+
             return self.vector_store
 
-        print(f"Building new knowledge base from: {self.data_path}")
-        documents = langchain_document_loader(self.data_path)
-        md_splitter, rec_splitter = create_advanced_markdown_splitter()
-        final_chunks = []
-
-        for doc in documents:
-            if not doc.page_content.strip(): continue
-            header_docs = md_splitter.split_text(doc.page_content)
-            sub_chunks = rec_splitter.split_documents(header_docs)
-            final_chunks.extend(sub_chunks)
-        
-        if final_chunks:
-            self.vector_store = FAISS.from_documents(final_chunks, self.embeddings)
-            persist_path.parent.mkdir(parents=True, exist_ok=True)
-            self.vector_store.save_local(str(persist_path))
-        return self.vector_store
-    
     def create_conversational_chain(self, strategy: str = "similarity"):
         if not self.vector_store:
             self.build_knowledge_base()
@@ -214,7 +279,7 @@ async def main():
     
     # 1. First Turn
     print(f"--- TURN 1 ---")
-    query1 = "What is a recommendation system?"
+    query1 = "How did a?"
     # You MUST 'await' the async function
     res1 = await engine.ask_with_sources_async(query1, 'user_123')
     

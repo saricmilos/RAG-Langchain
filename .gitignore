@@ -1,5 +1,12 @@
 # Ignore Python virtual environments
 venv/
+rag_venv/
+
+# FLY 
+*.toml
+
+#TEXT
+*.txt
 
 # ZIP
 *.zip
@@ -33,7 +40,7 @@ Thumbs.db
 *.jpg
 
 # Saved Models
-*.pkl
+# *.pkl NOT INCLUDED BECAUSE OF DEPLOYMENT
 
 # Latex
 #Report

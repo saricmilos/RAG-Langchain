@@ -26,7 +26,7 @@ for ticker in tickers:
         try:
             # Set a 'limit' or 'after' date to prevent downloading 30 years of history
             print(f"  Fetching {f_type}...")
-            dl.get(f_type, ticker, after="2022-01-01", download_details=False)
+            dl.get(f_type, ticker, after="2025-01-01", download_details=False)
             
             # SEC fair access: stay under 10 requests per second
             time.sleep(0.2) 
