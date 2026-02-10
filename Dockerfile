@@ -16,11 +16,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 2. Copy the application code
 COPY app/ ./app/
 
-# 3. Copy ONLY the vector store folder
-COPY data/vector_stores/ ./data/vector_stores/
+# 3. WE REMOVE THE LOCAL DATA COPY
+# Pinecone will be accessed via os.getenv("PINECONE_API_KEY")
 
 # Expose port for FastAPI
 EXPOSE 8080
 
 # Run main.py as a module so 'app' imports work
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
