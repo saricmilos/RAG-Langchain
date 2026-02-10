@@ -2,9 +2,14 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 from contextlib import asynccontextmanager
+from fastapi.middleware.cors import CORSMiddleware
 
 # Import the ChatEngine class from engine_deploy.py in the same app folder
 from app.engine_deploy import ChatEngine
+
+#LangSmith Test
+from langchain.tools import tool
+import requests
 
 # --- API SCHEMAS ---
 
@@ -25,16 +30,19 @@ engine = ChatEngine()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Startup logic to load the pre-built FAISS index once.
+    Startup logic to connect to Pinecone once.
     This runs before the server starts accepting requests.
     """
     try:
-        # load_offline_knowledge_base handles the path to the root data folder
-        engine.load_offline_knowledge_base()
+        # 1. Connect to Pinecone Cloud (Updated from load_offline_knowledge_base)
+        engine.load_pinecone_knowledge_base() 
+        
+        # 2. Prepare the RAG chain
         engine.create_conversational_chain()
-        print("Initialization successful: FAISS index loaded and chain created.")
+        
+        print(f"✅ Initialization successful: Connected to Pinecone index '{engine.index_name}'.")
     except Exception as e:
-        print(f"Initialization failed: {e}")
+        print(f"❌ Initialization failed: {e}")
         raise e
     yield
     print("Shutting down server.")
@@ -42,6 +50,20 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Conversational RAG API",
     lifespan=lifespan
+)
+
+# Add this after your app instance
+origins = [
+    "https://cassiopeiai.com",  # allow your frontend
+    "http://localhost:3000",    # if testing locally
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,          # or ["*"] for any origin (less secure)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # --- ENDPOINTS ---
@@ -83,7 +105,7 @@ async def chat(request: ChatRequest):
         )
 
     except FileNotFoundError as fnf:
-        print(f"❌ DATA ERROR: {fnf}")
+        print(f"DATA ERROR: {fnf}")
         raise HTTPException(
             status_code=500, 
             detail=f"Vector Database missing: {str(fnf)}"
@@ -91,7 +113,7 @@ async def chat(request: ChatRequest):
         
     except Exception as e:
         # This prints the FULL error stack trace in your server terminal
-        print(f"🔥 RAG SYSTEM ERROR: {type(e).__name__}")
+        print(f"RAG SYSTEM ERROR: {type(e).__name__}")
         import traceback
         traceback.print_exc() 
         
