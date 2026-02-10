@@ -1,165 +1,186 @@
 import os
 import sys
+import requests
+import asyncio
 from pathlib import Path
+from typing import List, Dict, Any
 from dotenv import load_dotenv
 
-# 1. Path & Env Setup
-# Ensures paths work regardless of where the script is executed
-current_file_path = Path(__file__).resolve()
-app_dir = current_file_path.parent
-root_dir = app_dir.parent
-
-# 2. LangChain Imports
-from langchain_community.vectorstores import FAISS
+# 1. LangChain Core & Lifecycle
+from langsmith import traceable
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.chat_history import InMemoryChatMessageHistory
 from langchain_core.runnables.history import RunnableWithMessageHistory
-from langchain_classic.chains import create_history_aware_retriever, create_retrieval_chain
-from langchain_classic.chains.combine_documents import create_stuff_documents_chain
+from langchain_core.tools import tool
+
+# 2. Modern Tooling & Retrieval (Updated 2026 Paths)
+from langchain_core.tools.retriever import create_retriever_tool
+
+# 3. Model & Vector Store Integrations
+from langchain_openai import ChatOpenAI
+from langchain_pinecone import PineconeVectorStore
 from langchain_huggingface import HuggingFaceEndpointEmbeddings
 
-# Import your helper functions from the 'app' directory
-if str(app_dir) not in sys.path:
-    sys.path.append(str(app_dir))
+# 4. Agent Execution (2026 Standard)
+from langchain.agents import create_agent
+from langchain_community.tools import DuckDuckGoSearchRun
 
-from functions_deploy import (
-    get_vectorstore_retriever,
-    create_compression_retriever,
-    instantiate_llm
-)
+# Duck duck GO FALLBACK Initialize the tool directly
+ddg_tool = DuckDuckGoSearchRun()
+# (Optional) If you want to customize the name/description for the agent:
+ddg_tool.name = "global_web_search"
+ddg_tool.description = "Use this for general news, current events, or when financial tools return no results."
 
-# --- PROMPT TEMPLATES ---
+# --- ALPHA VANTAGE NEWS ---
 
-REWRITER_SYSTEM_PROMPT = """
-You are an expert Query Transformation Engine. 
-Convert the conversational follow-up into a context-independent Standalone Question.
-Use 'Chat History' to resolve pronouns (it, they, etc.).
-Return ONLY the rephrased string. No extra text.
+@tool
+def get_financial_news(ticker: str) -> str:
+    """
+    Mandatory for live market news and sentiment. 
+    Input MUST be a single stock ticker symbol ONLY (e.g., 'AAPL', 'NVDA').
+    """
+    api_key = os.getenv("ALPHAVANTAGE_API_KEY")
+    # 1. Clean the input strictly
+    clean_ticker = ticker.strip().upper().replace("(", "").replace(")", "")
+    
+    # 2. Build the URL
+    url = f'https://www.alphavantage.co/query?function=NEWS_SENTIMENT&tickers={clean_ticker}&apikey={api_key}'
+    
+    print(f"\n[TOOL DEBUG] Requesting Alpha Vantage for: {clean_ticker}")
+    
+    try:
+        response = requests.get(url, timeout=10)
+        data = response.json()
+
+        # Handle API Notes (Rate Limits)
+        if "Note" in data:
+            print(f"[TOOL DEBUG] Rate limit hit.")
+            return "Note: Alpha Vantage rate limit reached. Please wait 60 seconds."
+        
+        feed = data.get("feed", [])
+        
+        # 3. If no ticker-specific news, try a broader topic search as a fallback
+        if not feed:
+            print(f"[TOOL DEBUG] No specific news for {clean_ticker}, trying broad search...")
+            fallback_url = f'https://www.alphavantage.co/query?function=NEWS_SENTIMENT&topics=technology&apikey={api_key}'
+            feed = requests.get(fallback_url).json().get("feed", [])[:3]
+
+        if not feed:
+            return f"No news found for {clean_ticker} even in broad search."
+
+        formatted_news = []
+        for item in feed[:5]:
+            title = item.get("title", "No Title")
+            sentiment = item.get("overall_sentiment_label", "Neutral")
+            formatted_news.append(f"Headline: {title}\nSentiment: {sentiment}\n---")
+            
+        return "\n".join(formatted_news)
+
+    except Exception as e:
+        return f"Tool error: {str(e)}"
+
+# --- IMPROVED SYSTEM PROMPT ---
+
+AGENT_SYSTEM_PROMPT = """
+You are a precise financial assistant.
+1. Use 'search_knowledge_base' for internal documents, filings, and historical data.
+2. Use 'get_financial_news' for real-time market events and stock sentiment.
+3. Use 'global_web_search' ONLY if the other tools return no results or for non-financial current events.
+Always cite your sources. If you use news, mention Alpha Vantage.
+Answer in English unless requested otherwise.
 """
-
-def get_answer_template(language: str = "English") -> ChatPromptTemplate:
-    system_instruction = (
-        "You are a precise financial assistant. Answer the user's question using ONLY the "
-        "provided context inside <context> tags.\n\n"
-        "If the answer is not in the context, say you don't know.\n"
-        f"Answer in {language}."
-    )
-
-    return ChatPromptTemplate.from_messages([
-        ("system", system_instruction),
-        MessagesPlaceholder(variable_name="chat_history"),
-        ("user", "Context:\n<context>\n{context}\n</context>\n\nQuestion: {input}")
-    ])
 
 # --- MAIN ENGINE ---
 
 class ChatEngine:
-    def __init__(
-        self, 
-        provider: str = "OpenAI", 
-        model_name: str = "gpt-4o-mini",
-        api_key: str = None
-    ):
+    def __init__(self, provider: str = "OpenAI", model_name: str = "gpt-4o-mini", api_key: str = None):
+        load_dotenv()
         self.provider = provider
         self.model_name = model_name
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
-        
-        if not self.api_key:
-            raise ValueError("API Key not found. Check your .env file.")
+        self.api_key = api_key or os.getenv(f"{provider.upper()}_API_KEY")
+        self.index_name = os.getenv("PINECONE_INDEX_NAME")
 
-        # Switch back to the model that matches your 29,802 saved vectors
-        print("Loading HuggingFace embedding model to match existing index...")
+        print("Loading HuggingFace embedding model...")
         self.embeddings = HuggingFaceEndpointEmbeddings(
-            model="all-MiniLM-L6-v2",
+            model="sentence-transformers/all-MiniLM-L6-v2",
             huggingfacehub_api_token=os.environ["HUGGINGFACEHUB_API_TOKEN"]
         )
         
         self.vector_store = None
-        self.chat_chain = None
+        self.agent_executor = None
         self.history_store = {} 
 
+    def load_pinecone_knowledge_base(self):
+        print(f"🌲 Connecting to Pinecone index: {self.index_name}...")
+        self.vector_store = PineconeVectorStore(
+            index_name=self.index_name,
+            embedding=self.embeddings,
+            pinecone_api_key=os.getenv("PINECONE_API_KEY")
+        )
+            
     def get_session_history(self, session_id: str):
         if session_id not in self.history_store:
             self.history_store[session_id] = InMemoryChatMessageHistory()
         return self.history_store[session_id]
 
-    def load_offline_knowledge_base(self):
-        """Loads the pre-built FAISS index from the specific folder."""
-        persist_path = root_dir / "data" / "vector_stores" / "faiss_index"
-        
-        if (persist_path / "index.faiss").exists():
-            print(f"📦 Loading pre-built index from: {persist_path}")
-            # allow_dangerous_deserialization is required for loading local pickle files (.pkl)
-            self.vector_store = FAISS.load_local(
-                str(persist_path), 
-                self.embeddings, 
-                allow_dangerous_deserialization=True
-            )
-            print(f"✅ Success: Loaded {self.vector_store.index.ntotal} vectors.")
-        else:
-            raise FileNotFoundError(f"FAISS index files missing at: {persist_path}")
-    
-    def create_conversational_chain(self, strategy: str = "similarity"):
-        """Builds the full RAG pipeline."""
+    def create_conversational_chain(self):
         if not self.vector_store:
-            self.load_offline_knowledge_base()
+            self.load_pinecone_knowledge_base()
         
-        # 1. Retriever Selection
-        if strategy == "mmr":
-            base_retriever = get_vectorstore_retriever(self.vector_store, search_type="mmr", k=4)
-        elif strategy == "compression":
-            standard_retriever = get_vectorstore_retriever(self.vector_store, k=10)
-            base_retriever = create_compression_retriever(self.embeddings, standard_retriever, k=4)
-        else: 
-            base_retriever = get_vectorstore_retriever(self.vector_store, k=4)
-
-        # 2. Setup LLMs
-        # We use a lower temperature for rephrasing to keep it precise
-        llm_rephraser = instantiate_llm(self.provider, self.api_key, "gpt-4o", 0.0)
-        llm_generator = instantiate_llm(self.provider, self.api_key, self.model_name, 0.5)
-
-        # 3. History-Aware Retrieval
-        rephrase_prompt = ChatPromptTemplate.from_messages([
-            ("system", REWRITER_SYSTEM_PROMPT),
-            MessagesPlaceholder(variable_name="chat_history"),
-            ("human", "{input}"),
-        ])
-        
-        history_aware_retriever = create_history_aware_retriever(
-            llm=llm_rephraser,
-            retriever=base_retriever,
-            prompt=rephrase_prompt
+        retriever_tool = create_retriever_tool(
+            self.vector_store.as_retriever(search_kwargs={"k": 4}),
+            "search_knowledge_base",
+            "Searches internal company documents and historical filings."
         )
 
-        # 4. Final Answer Chain
-        qa_prompt = get_answer_template(language="English")
-        question_answer_chain = create_stuff_documents_chain(llm=llm_generator, prompt=qa_prompt)
-        rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
+        tools = [retriever_tool, get_financial_news,ddg_tool]
+        llm = ChatOpenAI(model=self.model_name, api_key=self.api_key, temperature=0)
 
-        # 5. History Wrapper
-        self.chat_chain = RunnableWithMessageHistory(
-            rag_chain,
+        # 2026 Agent Abstraction
+        agent = create_agent(
+            model=llm,
+            tools=tools,
+            system_prompt=AGENT_SYSTEM_PROMPT
+        )
+
+        # Wrap with history logic
+        self.agent_executor = RunnableWithMessageHistory(
+            agent,
             self.get_session_history,
-            input_messages_key="input",
+            input_messages_key="messages",
             history_messages_key="chat_history",
-            output_messages_key="answer",
         )
     
+    @traceable(name="RAG_Brain_Process")
     async def ask_with_sources_async(self, question: str, session_id: str = "default_session"):
-        """Async entry point for FastAPI."""
-        if not self.chat_chain:
+        if not self.agent_executor:
             self.create_conversational_chain()
         
-        response = await self.chat_chain.ainvoke(
-            {"input": question},
+        # In 2026, agents expect a list of messages as input
+        inputs = {"messages": [HumanMessage(content=question)]}
+        
+        response = await self.agent_executor.ainvoke(
+            inputs,
             config={"configurable": {"session_id": session_id}}
         )
     
-        # Extract unique sources from context documents
-        context_docs = response.get("context", [])
-        sources = sorted(list(set(doc.metadata.get("source", "Unknown") for doc in context_docs)))
+        # Logic to extract answer and tools from the State messages
+        messages = response.get("messages", [])
+        final_answer = messages[-1].content if messages else "I encountered an error."
+        
+        sources = []
+        for msg in messages:
+            # Check for tool calls made by the AI
+            if hasattr(msg, "tool_calls") and msg.tool_calls:
+                for call in msg.tool_calls:
+                    name = call.get("name")
+                    if name == "get_financial_news":
+                        sources.append("Alpha Vantage Real-time News")
+                    elif name == "search_knowledge_base":
+                        sources.append("Internal Knowledge Base (Pinecone)")
 
         return {
-            "answer": response["answer"],
-            "sources": sources
+            "answer": final_answer,
+            "sources": list(set(sources)) if sources else ["General Knowledge"]
         }
