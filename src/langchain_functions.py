@@ -25,7 +25,6 @@ from pathlib import Path
 from langchain_community.vectorstores import FAISS
 from langchain_core.embeddings import Embeddings
 from langchain_core.documents import Document
-from typing import List, Tuple
 
 from typing import List, Union, Iterable
 from langchain_core.documents import Document
@@ -86,17 +85,22 @@ LOADER_MAPPING = {
 
 def langchain_document_loader(tmp_dir: Path):
     documents = []
-    
+    # Use rglob for faster, direct file system access
     for ext, loader_cls in LOADER_MAPPING.items():
-        # Using DirectoryLoader for each type to handle recursive globbing
-        loader = DirectoryLoader(
-            str(tmp_dir), 
-            glob=f"**/*{ext}", 
-            loader_cls=loader_cls,
-            # Pass encoding only to loaders that need/support it
-            loader_kwargs={"encoding": "utf8"} if ext in [".txt", ".md", ".csv"] else {}
-        )
-        documents.extend(loader.load())
+        # This finds all files with the extension inside the company folder
+        files = list(tmp_dir.rglob(f"*{ext}"))
+        
+        for file_path in files:
+            try:
+                # Explicitly use encoding for text-based files
+                if ext in [".txt", ".md", ".csv"]:
+                    loader = loader_cls(str(file_path), encoding="utf8")
+                else:
+                    loader = loader_cls(str(file_path))
+                
+                documents.extend(loader.load())
+            except Exception as e:
+                print(f"Error loading {file_path.name}: {e}")
         
     return documents
 
@@ -186,6 +190,25 @@ def create_advanced_markdown_splitter(chunk_size=1600, chunk_overlap=200):
     )
     
     return markdown_splitter, recursive_splitter
+
+def create_advanced_sec_splitter(chunk_size=2000, chunk_overlap=300):
+    # Instead of Markdown, we use structural text markers common in SEC filings
+    recursive_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        # Order matters: split by Items first, then paragraphs, then lines
+        separators=[
+            "\nITEM ",        # SEC Section boundaries
+            "\nItem ",        # Variation
+            "\n\n\n",         # Large gaps (often table breaks)
+            "\n\n",           # Paragraphs
+            "\n",             # Lines
+            " ",              # Words
+            ""
+        ],
+        keep_separator=True
+    )
+    return recursive_splitter
 
 def split_documents(documents, splitter: RecursiveCharacterTextSplitter):
     """
@@ -530,7 +553,6 @@ def instantiate_llm(
         raise ValueError(f"Unsupported LLM provider: {provider}")
 
     except Exception as e:
-        # FAANG logging tip: Never just print; use structured logging in real apps
         print(f"[Error] Initialization failed for {provider}: {str(e)}")
         raise
 
