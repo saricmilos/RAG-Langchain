@@ -4,6 +4,7 @@ rag_venv/
 
 # FLY 
 *.toml
+*.yml
 
 #TEXT
 *.txt
