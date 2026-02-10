@@ -8,7 +8,7 @@ from datetime import datetime
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir))
 
-from rag_engine.ingestion_pipeline import ChatEngine
+from engine import ChatEngine
 
 # Configure Logging for professional visibility
 logging.basicConfig(
