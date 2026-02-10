@@ -1,24 +1,29 @@
-# Core LangChain modules
-langchain-core>=0.1.16
-langchain-classic>=0.0.15
-langchain-community>=0.0.10
-langchain-huggingface>=0.0.7
-langchain-openai
-huggingface-hub
-langchain
+# --- Core Framework ---
+langchain>=1.2.9
+langchain-core>=1.2.9
+langchain-community>=0.3.0
+langchain-classic>=1.0.1
+langsmith>=0.3.0
 
-# API keys and env management
-python-dotenv>=1.0.0
+# --- Partner Integrations ---
+langchain-openai>=1.1.7
+langchain-pinecone>=0.2.13
+langchain-huggingface>=0.1.0  # Required for HuggingFaceEndpointEmbeddings
+huggingface-hub>=0.28.0
 
-# Vector store
-faiss-cpu>=1.7.3
+# --- Tools & Search ---
+duckduckgo-search>=6.0.0      # Required for DuckDuckGoSearchRun
 
-# LLMs
-openai>=0.27.8
+# --- Tools & Search ---
+ddgs>=8.1.0        # This specifically satisfies the 'ddgs' module requirement
 
-# FastAPI (if using your async endpoint)
-fastapi>=0.108.0
-uvicorn[standard]>=0.23.1
+# --- Data & Vector Stores ---
+pinecone-client>=6.0.0        # Ensure you're using the client package
+faiss-cpu>=1.9.0
 
-# Optional helpers
-requests>=2.31.0
+# --- API & Environment ---
+fastapi>=0.128.0
+uvicorn[standard]>=0.30.0
+python-dotenv>=1.0.1
+requests>=2.32.0
+pydantic>=2.10.0
