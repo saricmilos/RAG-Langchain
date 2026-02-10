@@ -7,7 +7,7 @@ rag_venv/
 *.yml
 
 #TEXT
-*.txt
+*.txtS
 
 # ZIP
 *.zip
