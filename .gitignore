@@ -55,3 +55,6 @@ Thumbs.db
 *.snm
 *.toc
 *.out
+
+# Local FAISS index, ~105 MB: rebuilt by FAISS_ingestion_locally.py; the deployed app reads Pinecone
+data/vector_stores/
