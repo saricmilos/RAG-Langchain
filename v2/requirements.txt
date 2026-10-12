@@ -1,0 +1,13 @@
+# v2 runs on Python 3.11. torch from the CPU index keeps the install small:
+#   pip install torch==2.14.1 --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r requirements.txt
+torch==2.14.1
+sentence-transformers==6.1.0
+transformers==5.19.0
+faiss-cpu==1.15.1
+lxml==6.1.3
+numpy==2.4.6
+scipy==1.17.1
+openai==3.29.0
+python-dotenv==1.2.4
+requests==2.34.2

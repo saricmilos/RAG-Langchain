@@ -1,0 +1,4 @@
+# Rebuilt by the scripts: parsed filings, chunks, embeddings, run logs
+work/
+.venv/
+__pycache__/

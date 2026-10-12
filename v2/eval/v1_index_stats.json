@@ -1,0 +1,15 @@
+{
+ "chunks": 29802,
+ "companies": {
+  "AMZN": 29802
+ },
+ "sources": {
+  "full-submission.txt": 29802
+ },
+ "chunk_chars_median": 1971,
+ "tokens_median": 869,
+ "pct_chunks_over_window": 98.5,
+ "pct_tokens_never_embedded": 72.5,
+ "pct_chars_markup": 60.8,
+ "pct_chunks_with_uuencoded_lines": 14.4
+}
