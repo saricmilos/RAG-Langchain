@@ -54,22 +54,42 @@ def retrieval_scores(hits: list[bool], ks=(1, 3, 5, 10)) -> dict:
     return out
 
 
-def numbers_in(text: str) -> list[tuple[float, float, bool]]:
-    """(value, half a unit of its last digit, has an explicit scale word) for every number in the text."""
+MONTHS = "jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec"
+NOT_AMOUNTS = [
+    re.compile(rf"(?:{MONTHS})[a-z]*\.?\s+\d{{1,2}}(?:,\s*\d{{4}})?", re.I),   # dates: "June 30, 2025"
+    re.compile(r"(?:19|20)\d{2}"),                                               # years
+    re.compile(r"\[\d{1,2}\]"),                                                     # citation markers
+    re.compile(r"q[1-4]", re.I),                                                # quarters
+    re.compile(r"\d+(?:\.\d+)?\s*%"),                                               # percentages
+]
+
+
+def numbers_in(text: str) -> list[tuple[float, float, bool, bool]]:
+    """(value, half a unit of its last digit, has a scale word, has a thousands comma) per amount in the text.
+
+    Dates, years, citation markers, quarters and percentages are removed first: "June 30" is not $30 billion.
+    """
+    for pattern in NOT_AMOUNTS:
+        text = pattern.sub(" ", text)
     out = []
     for m in NUM_RE.finditer(text):
         whole, frac, scale = m.group(1), m.group(2), (m.group(3) or "").lower()
         value = float(whole.replace(",", "") + ("." + frac if frac else ""))
         mult = SCALE.get(scale, 1.0)
-        out.append((value * mult, 0.5 * 10 ** (-len(frac or "")) * mult, bool(scale)))
+        out.append((value * mult, 0.5 * 10 ** (-len(frac or "")) * mult, bool(scale), "," in whole))
     return out
 
 
 def numeric_correct(answer: str, gold: dict) -> bool:
-    """True if the answer states the gold value, to the precision it gives (and within 5%)."""
+    """True if the answer states the gold value, to the precision it gives (and within 5%).
+
+    A number with no scale word counts as itself, or as thousands or millions only when it is
+    written with a thousands comma ("416,161", as the filings' tables print millions).
+    """
     target = abs(gold["value"])
-    for value, half_unit, scaled in numbers_in(answer):
-        candidates = [(value, half_unit)] if scaled else [(value * s, half_unit * s) for s in (1, 1e3, 1e6, 1e9)]
+    for value, half_unit, scaled, comma in numbers_in(answer):
+        scales = (1,) if scaled or not comma else (1, 1e3, 1e6)
+        candidates = [(value * s, half_unit * s) for s in scales]
         for v, tol in candidates:
             err = abs(v - target)
             if err <= max(0.005 * target, tol) and err <= 0.05 * target:

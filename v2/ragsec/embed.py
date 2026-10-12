@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 
 import numpy as np
 from dotenv import load_dotenv
@@ -27,6 +28,7 @@ EMBEDDERS = {
 }
 
 _st_models: dict = {}
+_query_lock = threading.Lock()
 
 
 def load_chunks() -> list[Chunk]:
@@ -83,10 +85,11 @@ def chunk_matrix(key: str, chunks: list[Chunk] | None = None) -> np.ndarray:
 def query_matrix(key: str, questions: list[str]) -> np.ndarray:
     """Query embeddings, cached per embedder and question text."""
     path = EMB_DIR / f"{key}.queries.json"
-    cache = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    missing = [q for q in dict.fromkeys(questions) if q not in cache]
-    if missing:
-        for q, v in zip(missing, embed_texts(key, missing, is_query=True)):
-            cache[q] = v.tolist()
-        path.write_text(json.dumps(cache), encoding="utf-8")
-    return np.asarray([cache[q] for q in questions], dtype=np.float32)
+    with _query_lock:   # answer threads share this file
+        cache = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        missing = [q for q in dict.fromkeys(questions) if q not in cache]
+        if missing:
+            for q, v in zip(missing, embed_texts(key, missing, is_query=True)):
+                cache[q] = v.tolist()
+            path.write_text(json.dumps(cache), encoding="utf-8")
+        return np.asarray([cache[q] for q in questions], dtype=np.float32)

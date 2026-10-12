@@ -57,11 +57,10 @@ def chat(model: str, messages: list[dict], temperature: float = 0.0, json_mode: 
                     "seconds": round(time.time() - t, 2)}
             meta["cost"] = cost_of(model, meta["tokens_in"], meta["tokens_out"])
             return resp.choices[0].message.content or "", meta
-        except Exception as e:  # rate limits and transient errors
+        except Exception:  # rate limits and transient errors
             if attempt == 4:
                 raise
             time.sleep(2 ** attempt + 1)
-            last = e  # noqa: F841
     raise RuntimeError("unreachable")
 
 
