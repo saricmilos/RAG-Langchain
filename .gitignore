@@ -58,3 +58,6 @@ Thumbs.db
 
 # Local FAISS index, ~105 MB: rebuilt by FAISS_ingestion_locally.py; the deployed app reads Pinecone
 data/vector_stores/
+
+# v2 keeps its requirements file (the *.txt rule above is v1's)
+!v2/requirements.txt
