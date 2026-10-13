@@ -5,7 +5,7 @@ public companies from their SEC filings. It had never been tested against known 
 started from that test: 223 questions with known answers, which v1's own code answered first,
 then every change to v2 was measured against the same set.
 
-Built with Claude Code in October 2026. The results are on
+Built in October 2026. The results are on
 [saricmilos.com/projects/sec-filings-rag](https://www.saricmilos.com/projects/sec-filings-rag).
 
 ## Results
