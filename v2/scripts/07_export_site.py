@@ -21,7 +21,7 @@ SITE = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(r"C:\dev\sites\saricmilo
 OUT = SITE / "src" / "content" / "sec-filings-rag"
 
 GROUPS = {
-    "showcase": "v1's own test questions",
+    "showcase": "Open-ended",
     "numeric": "Numbers",
     "text": "Risks, strategy, business",
     "unanswerable": "Not in the filings",
@@ -183,8 +183,10 @@ def main() -> None:
         "final": next(iter(v2.values()))["system"],
     }
 
+    # The site's demo shows v2's answers only; v1's stay in results.json's numbers, which the page reads
+    shown = [{k: v for k, v in i.items() if k != "v1"} for i in items]
     OUT.mkdir(parents=True, exist_ok=True)
-    (OUT / "demo.json").write_text(json.dumps({"featured": featured, "items": items}, ensure_ascii=False,
+    (OUT / "demo.json").write_text(json.dumps({"featured": featured, "items": shown}, ensure_ascii=False,
                                               separators=(",", ":")),
                                    encoding="utf-8")
     (OUT / "results.json").write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
